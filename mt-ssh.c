@@ -1,6 +1,6 @@
 /*
  *  MTscan - MikroTik RouterOS wireless scanner
- *  Copyright (c) 2015-2017  Konrad Kosmatka
+ *  Copyright (c) 2015-2020  Konrad Kosmatka
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License
@@ -21,10 +21,16 @@
 #include <errno.h>
 #include <libssh/libssh.h>
 #include "mt-ssh.h"
-
 #ifdef G_OS_WIN32
+#include <mstcpip.h>
 #include "win32.h"
-#endif // G_OS_WIN32
+#else
+#include <netinet/tcp.h>
+#endif
+
+#define MT_SSH_TCP_KEEPCNT    2
+#define MT_SSH_TCP_KEEPINTVL 10
+#define MT_SSH_TCP_KEEPIDLE  30
 
 /* ---------------------------------------
    PTY_COLS 140 was fine up to v6.29.x,
@@ -213,6 +219,7 @@ gboolean mt_ssh_cb_msg(gpointer user_data);
 
 static gpointer mt_ssh_thread(gpointer);
 static gboolean mt_ssh_verify(mt_ssh_t*, ssh_session);
+static void mt_ssh_conf_keepalive(ssh_session);
 
 static void mt_ssh(mt_ssh_t*);
 static void mt_ssh_request(mt_ssh_t*, const gchar*);
@@ -730,6 +737,8 @@ mt_ssh_thread(gpointer data)
     if(context->canceled)
         goto cleanup_disconnect;
 
+    mt_ssh_conf_keepalive(session);
+
     if(!mt_ssh_verify(context, session))
     {
         context->return_state = MT_SSH_ERR_VERIFY;
@@ -892,6 +901,40 @@ mt_ssh_verify(mt_ssh_t    *context,
     ssh_clean_pubkey_hash(&hash);
     return TRUE;
 }
+
+static void
+mt_ssh_conf_keepalive(ssh_session session)
+{
+    socket_t fd = ssh_get_fd(session);
+
+    if(fd < 0)
+        return;
+
+#ifdef G_OS_WIN32
+    DWORD ret;
+    struct tcp_keepalive ka =
+    {
+        .onoff = 1,
+        .keepaliveinterval = MT_SSH_TCP_KEEPINTVL * MT_SSH_TCP_KEEPCNT * 1000 / 10,
+        .keepalivetime = MT_SSH_TCP_KEEPIDLE * 1000
+    };
+    WSAIoctl(fd, SIO_KEEPALIVE_VALS, &ka, sizeof(ka), NULL, 0, &ret, NULL, NULL);
+#else
+    gint opt = 1;
+    if(setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt)) >= 0)
+    {
+        opt = MT_SSH_TCP_KEEPCNT;
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &opt, sizeof(opt));
+
+        opt = MT_SSH_TCP_KEEPINTVL;
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &opt, sizeof(opt));
+
+        opt = MT_SSH_TCP_KEEPIDLE;
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &opt, sizeof(opt));
+    }
+#endif
+}
+
 
 static void
 mt_ssh(mt_ssh_t *context)

@@ -33,7 +33,9 @@ include_directories(${LIBCURL_INCLUDE_DIRS})
 link_directories(${LIBCURL_LIBRARY_DIRS})
 add_definitions(${LIBCURL_CFLAGS_OTHER})
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic")
+INCLUDE (CheckIncludeFile)
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wno-deprecated-declarations")
 
 set(SOURCE_FILES
         callbacks.c
@@ -60,6 +62,8 @@ set(SOURCE_FILES
         gps.h
         log.c
         log.h
+        conf-extlist.c
+        conf-extlist.h
         main.c
         misc.c
         misc.h
@@ -80,8 +84,6 @@ set(SOURCE_FILES
         ui-connection.h
         ui-dialogs.c
         ui-dialogs.h
-        ui-dialog-pcap.c
-        ui-dialog-pcap.h
         ui-icons.c
         ui-icons.h
         ui-log.c
@@ -108,6 +110,8 @@ set(SOURCE_FILES
         tzsp/nv2.h
         tzsp/mac80211.h
         tzsp/mac80211.c
+        tzsp/cambium.c
+        tzsp/cambium.h
         tzsp/ie-airmax.h
         tzsp/ie-airmax.c
         tzsp/ie-airmax-ac.h
@@ -116,8 +120,6 @@ set(SOURCE_FILES
         tzsp/ie-mikrotik.h
         tzsp/ie-mikrotik-utils.c
         tzsp/ie-mikrotik-utils.h
-        tzsp/tzsp-sniffer.c
-        tzsp/tzsp-sniffer.h
         tzsp/tzsp-socket.c
         tzsp/tzsp-socket.h
         tzsp/utils.c
@@ -146,9 +148,6 @@ set(LIBRARIES
         ${LIBCURL_LIBRARIES}
         m)
 
-set(LIBRARIES_UNIX
-        pcap)
-
 set(LIBRARIES_MINGW
         ws2_32
         winmm)
@@ -161,16 +160,14 @@ if(MINGW)
     ENABLE_LANGUAGE(RC)
     SET(CMAKE_RC_COMPILE_OBJECT "<CMAKE_RC_COMPILER> -i <SOURCE> -o <OBJECT>")
 
-    SET(NPCAP_DIR /build/npcap-sdk-0.1)
-    include_directories(${CMAKE_CURRENT_SOURCE_DIR}${NPCAP_DIR}/Include)
-    IF(CMAKE_SIZEOF_VOID_P EQUAL 8)
-        set(LIBRARIES_MINGW_NPCAP ${CMAKE_CURRENT_SOURCE_DIR}${NPCAP_DIR}/Lib/x64/wpcap.lib)
-    ELSE()
-        set(LIBRARIES_MINGW_NPCAP ${CMAKE_CURRENT_SOURCE_DIR}${NPCAP_DIR}/Lib/wpcap.lib)
-    ENDIF()
     add_executable(mtscan ${SOURCE_FILES} ${SOURCE_FILES_MINGW})
-    target_link_libraries(mtscan ${LIBRARIES} ${LIBRARIES_MINGW} ${LIBRARIES_MINGW_NPCAP})
+    target_link_libraries(mtscan ${LIBRARIES} ${LIBRARIES_MINGW})
 ELSE()
     add_executable(mtscan ${SOURCE_FILES})
+    install(TARGETS mtscan DESTINATION bin)
+    install(DIRECTORY icons/ DESTINATION share/icons/hicolor
+            PATTERN "INFO" EXCLUDE
+            PATTERN "ico" EXCLUDE)
+    install(CODE "execute_process(COMMAND gtk-update-icon-cache /usr/share/icons/hicolor)")
     target_link_libraries(mtscan ${LIBRARIES} ${LIBRARIES_UNIX})
 ENDIF()

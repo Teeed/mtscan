@@ -1,14 +1,14 @@
 #include <glib.h>
+#include <string.h>
 #include "tzsp/tzsp-socket.h"
-#include "tzsp/tzsp-sniffer.h"
 #include "tzsp/mac80211.h"
 #include "network.h"
 #include "tzsp-receiver.h"
+#include "tzsp/cambium.h"
 
 typedef struct tzsp_receiver
 {
     tzsp_socket_t *tzsp_socket;
-    tzsp_sniffer_t *tzsp_sniffer;
     gint channel_width;
     gint frequency_base;
     void (*cb_final)(tzsp_receiver_t*);
@@ -29,7 +29,6 @@ static gboolean tzsp_receiver_callback_final(gpointer);
 
 tzsp_receiver_t*
 tzsp_receiver_new(guint16       udp_port,
-                  const gchar  *pcap_dev_if,
                   guint8        hw_addr[6],
                   gint          channel_width,
                   gint          frequency_base,
@@ -37,45 +36,19 @@ tzsp_receiver_new(guint16       udp_port,
                   void        (*cb_network)(const tzsp_receiver_t*, network_t*))
 {
     tzsp_socket_t *socket = NULL;
-    tzsp_sniffer_t *sniffer = NULL;
     tzsp_receiver_t *context;
 
-    if(pcap_dev_if)
+    socket = tzsp_socket_new();
+    if(socket == NULL ||
+       tzsp_socket_init(socket, udp_port, NULL, NULL) != TZSP_SOCKET_OK)
     {
-        printf("tzsp_sniffer\n");
-        sniffer = tzsp_sniffer_new();
-        printf("tzsp_sniffer_new failed\n");
-        if(sniffer == NULL ||
-           tzsp_sniffer_init(sniffer, udp_port, NULL, NULL, pcap_dev_if, 0) != TZSP_SNIFFER_OK)
-        {
-            printf("tzsp_sniffer_init failed: %s\n", tzsp_sniffer_get_error(sniffer));
-            tzsp_sniffer_free(sniffer);
-            return NULL;
-        }
-    }
-    else
-    {
-        socket = tzsp_socket_new();
-        if(socket == NULL ||
-           tzsp_socket_init(socket, udp_port, NULL, NULL) != TZSP_SOCKET_OK)
-        {
-            tzsp_socket_free(socket);
-            return NULL;
-        }
+        tzsp_socket_free(socket);
+        return NULL;
     }
 
     context = g_malloc0(sizeof(tzsp_receiver_t));
-
-    if(sniffer)
-    {
-        context->tzsp_sniffer = sniffer;
-        tzsp_sniffer_set_func(sniffer, tzsp_receiver_packet, context);
-    }
-    else
-    {
-        context->tzsp_socket = socket;
-        tzsp_socket_set_func(socket, tzsp_receiver_packet, context);
-    }
+    context->tzsp_socket = socket;
+    tzsp_socket_set_func(socket, tzsp_receiver_packet, context);
 
     memcpy(context->hw_addr, hw_addr, 6);
     context->channel_width = channel_width;
@@ -97,12 +70,7 @@ static gpointer
 tzsp_receiver_thread(gpointer user_data)
 {
     tzsp_receiver_t *context = (tzsp_receiver_t*)user_data;
-
-    if(context->tzsp_sniffer)
-        tzsp_sniffer_loop(context->tzsp_sniffer);
-    else if(context->tzsp_socket)
-        tzsp_socket_loop(context->tzsp_socket);
-
+    tzsp_socket_loop(context->tzsp_socket);
     g_idle_add(tzsp_receiver_callback_final, context);
     return NULL;
 }
@@ -119,6 +87,7 @@ tzsp_receiver_packet(const uint8_t *packet,
     tzsp_receiver_t *context = (tzsp_receiver_t*)user_data;
     mac80211_net_t *net_80211 = NULL;
     nv2_net_t *net_nv2 = NULL;
+    cambium_net_t *net_cambium = NULL;
     const uint8_t *src;
     tzsp_receiver_net_t *data;
 
@@ -138,12 +107,15 @@ tzsp_receiver_packet(const uint8_t *packet,
         net_80211 = mac80211_network(packet, len, &src);
         if(!net_80211)
         {
-            /* This is not a IEEE 802.11 frame at all */
-            return;
-        }
+            /* This is not a IEEE 802.11 frame */
 
-        if(net_80211->source != MAC80211_FRAME_BEACON &&
-           net_80211->source != MAC80211_FRAME_PROBE_RESPONSE)
+            /* Try cambium parser */
+            net_cambium = cambium_network(packet, len, &src);
+            if(!net_cambium)
+                return;
+        }
+        else if(net_80211->source != MAC80211_FRAME_BEACON &&
+                net_80211->source != MAC80211_FRAME_PROBE_RESPONSE)
         {
             /* This is other IEEE 802.11 frame */
             mac80211_net_free(net_80211);
@@ -294,6 +266,16 @@ tzsp_receiver_packet(const uint8_t *packet,
         nv2_net_free(net_nv2);
     }
 
+    if(net_cambium)
+    {
+        data->network->ssid = g_strdup(cambium_net_get_ssid(net_cambium));
+
+        if(cambium_net_get_frequency(net_cambium))
+            data->network->frequency = cambium_net_get_frequency(net_cambium) * 1000;
+
+        cambium_net_free(net_cambium);
+    }
+
     data->network->firstseen = g_get_real_time() / 1000000;
     data->network->lastseen = data->network->firstseen;
 
@@ -315,16 +297,8 @@ tzsp_receiver_callback_final(gpointer user_data)
 {
     tzsp_receiver_t *context = (tzsp_receiver_t*)user_data;
 
-    if(context->tzsp_sniffer)
-    {
-        tzsp_sniffer_free(context->tzsp_sniffer);
-        context->tzsp_sniffer = NULL;
-    }
-    else if(context->tzsp_socket)
-    {
-        tzsp_socket_free(context->tzsp_socket);
-        context->tzsp_socket = NULL;
-    }
+    tzsp_socket_free(context->tzsp_socket);
+    context->tzsp_socket = NULL;
 
     context->cb_final(context);
     return G_SOURCE_REMOVE;
@@ -333,26 +307,17 @@ tzsp_receiver_callback_final(gpointer user_data)
 void
 tzsp_receiver_enable(tzsp_receiver_t *context)
 {
-    if(context->tzsp_sniffer)
-        tzsp_sniffer_enable(context->tzsp_sniffer);
-    else if(context->tzsp_socket)
-        tzsp_socket_enable(context->tzsp_socket);
+    tzsp_socket_enable(context->tzsp_socket);
 }
 
 void
 tzsp_receiver_disable(tzsp_receiver_t *context)
 {
-    if(context->tzsp_sniffer)
-        tzsp_sniffer_disable(context->tzsp_sniffer);
-    else if(context->tzsp_socket)
-        tzsp_socket_disable(context->tzsp_socket);
+    tzsp_socket_disable(context->tzsp_socket);
 }
 
 void
 tzsp_receiver_cancel(tzsp_receiver_t *context)
 {
-    if(context->tzsp_sniffer)
-        tzsp_sniffer_cancel(context->tzsp_sniffer);
-    else if(context->tzsp_socket)
-        tzsp_socket_cancel(context->tzsp_socket);
+    tzsp_socket_cancel(context->tzsp_socket);
 }

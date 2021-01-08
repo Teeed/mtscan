@@ -18,12 +18,6 @@
 #include <gtk/gtk.h>
 #include "conf-profile.h"
 
-typedef enum mtscan_conf_tzsp_mode
-{
-    MTSCAN_CONF_TZSP_MODE_SOCKET,
-    MTSCAN_CONF_TZSP_MODE_PCAP
-} mtscan_conf_tzsp_mode_t;
-
 typedef enum mtscan_conf_tzsp_band
 {
     MTSCAN_CONF_TZSP_BAND_2GHZ,
@@ -115,6 +109,9 @@ void conf_set_preferences_signals(gboolean);
 gboolean conf_get_preferences_display_time_only();
 void conf_set_preferences_display_time_only(gboolean);
 
+gboolean conf_get_preferences_reconnect(void);
+void conf_set_preferences_reconnect(gboolean);
+
 const gchar* const* conf_get_preferences_view_cols_order(void);
 void conf_set_preferences_view_cols_order(const gchar* const*);
 
@@ -142,14 +139,8 @@ void conf_set_preferences_events_new_network(gboolean);
 const gchar* conf_get_preferences_events_new_network_exec(void);
 void conf_set_preferences_events_new_network_exec(const gchar*);
 
-mtscan_conf_tzsp_mode_t conf_get_preferences_tzsp_mode(void);
-void conf_set_preferences_tzsp_mode(mtscan_conf_tzsp_mode_t);
-
 gint conf_get_preferences_tzsp_udp_port(void);
 void conf_set_preferences_tzsp_udp_port(gint);
-
-const gchar* conf_get_preferences_tzsp_interface(void);
-void conf_set_preferences_tzsp_interface(const gchar*);
 
 gint conf_get_preferences_tzsp_channel_width(void);
 void conf_set_preferences_tzsp_channel_width(gint);
@@ -190,6 +181,12 @@ void conf_set_preferences_blacklist_enabled(gboolean);
 gboolean conf_get_preferences_blacklist_inverted(void);
 void conf_set_preferences_blacklist_inverted(gboolean);
 
+gboolean conf_get_preferences_blacklist_external(void);
+void conf_set_preferences_blacklist_external(gboolean);
+
+const gchar* conf_get_preferences_blacklist_ext_path(void);
+void conf_set_preferences_blacklist_ext_path(const gchar*);
+
 gboolean conf_get_preferences_blacklist(gint64);
 void conf_set_preferences_blacklist(gint64);
 void conf_del_preferences_blacklist(gint64);
@@ -203,6 +200,12 @@ void conf_set_preferences_highlightlist_enabled(gboolean);
 gboolean conf_get_preferences_highlightlist_inverted(void);
 void conf_set_preferences_highlightlist_inverted(gboolean);
 
+gboolean conf_get_preferences_highlightlist_external(void);
+void conf_set_preferences_highlightlist_external(gboolean);
+
+const gchar* conf_get_preferences_highlightlist_ext_path(void);
+void conf_set_preferences_highlightlist_ext_path(const gchar*);
+
 gboolean conf_get_preferences_highlightlist(gint64);
 void conf_set_preferences_highlightlist(gint64);
 void conf_del_preferences_highlightlist(gint64);
@@ -212,6 +215,12 @@ void conf_set_preferences_highlightlist_from_liststore(GtkListStore*);
 
 gboolean conf_get_preferences_alarmlist_enabled(void);
 void conf_set_preferences_alarmlist_enabled(gboolean);
+
+gboolean conf_get_preferences_alarmlist_external(void);
+void conf_set_preferences_alarmlist_external(gboolean);
+
+const gchar* conf_get_preferences_alarmlist_ext_path(void);
+void conf_set_preferences_alarmlist_ext_path(const gchar*);
 
 gboolean conf_get_preferences_alarmlist(gint64);
 void conf_set_preferences_alarmlist(gint64);
@@ -251,6 +260,5 @@ void conf_set_preferences_location_min_distance(gint);
 
 gint conf_get_preferences_location_max_distance(void);
 void conf_set_preferences_location_max_distance(gint);
-
 
 #endif

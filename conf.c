@@ -1,6 +1,6 @@
 /*
  *  MTscan - MikroTik RouterOS wireless scanner
- *  Copyright (c) 2015-2018  Konrad Kosmatka
+ *  Copyright (c) 2015-2020  Konrad Kosmatka
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License
@@ -21,6 +21,7 @@
 #include "ui-view.h"
 #include "misc.h"
 #include "conf-scanlist.h"
+#include "conf-extlist.h"
 
 #define CONF_DIR  "mtscan"
 #define CONF_FILE "mtscan.conf"
@@ -50,7 +51,6 @@
 #define CONF_DEFAULT_PROFILE_DURATION       FALSE
 #define CONF_DEFAULT_PROFILE_REMOTE         FALSE
 #define CONF_DEFAULT_PROFILE_BACKGROUND     FALSE
-#define CONF_DEFAULT_PROFILE_RECONNECT      TRUE
 
 #define CONF_DEFAULT_SCANLIST_NAME          "unnamed"
 #define CONF_DEFAULT_SCANLIST_DATA          "default"
@@ -68,15 +68,14 @@
 #define CONF_DEFAULT_PREFERENCES_NO_STYLE_OVERRIDE      FALSE
 #define CONF_DEFAULT_PREFERENCES_SIGNALS                TRUE
 #define CONF_DEFAULT_PREFERENCES_DISPLAY_TIME_ONLY      FALSE
+#define CONF_DEFAULT_PREFERENCES_RECONNECT              FALSE
 #define CONF_DEFAULT_PREFERENCES_SOUNDS_NEW_NETWORK     TRUE
 #define CONF_DEFAULT_PREFERENCES_SOUNDS_NEW_NETWORK_HI  TRUE
 #define CONF_DEFAULT_PREFERENCES_SOUNDS_NEW_NETWORK_AL  TRUE
 #define CONF_DEFAULT_PREFERENCES_SOUNDS_NO_DATA         TRUE
 #define CONF_DEFAULT_PREFERENCES_SOUNDS_NO_GPS_DATA     TRUE
 #define CONF_DEFAULT_PREFERENCES_EVENTS_NEW_NETWORK     FALSE
-#define CONF_DEFAULT_PREFERENCES_TZSP_MODE              MTSCAN_CONF_TZSP_MODE_SOCKET
 #define CONF_DEFAULT_PREFERENCES_TZSP_UDP_PORT          0x9090
-#define CONF_DEFAULT_PREFERENCES_TZSP_INTERFACE         "eno1"
 #define CONF_DEFAULT_PREFERENCES_TZSP_CHANNEL_WIDTH     20
 #define CONF_DEFAULT_PREFERENCES_TZSP_BAND              MTSCAN_CONF_TZSP_BAND_5GHZ
 #define CONF_DEFAULT_PREFERENCES_GPS_HOSTNAME           "localhost"
@@ -90,9 +89,12 @@
 #define CONF_DEFAULT_PREFERENCES_ROTATOR_DEF_SPEED      100
 #define CONF_DEFAULT_PREFERENCES_BLACKLIST_ENABLED      FALSE
 #define CONF_DEFAULT_PREFERENCES_BLACKLIST_INVERTED     FALSE
+#define CONF_DEFAULT_PREFERENCES_BLACKLIST_EXTERNAL     FALSE
 #define CONF_DEFAULT_PREFERENCES_HIGHLIGHTLIST_ENABLED  FALSE
 #define CONF_DEFAULT_PREFERENCES_HIGHLIGHTLIST_INVERTED FALSE
+#define CONF_DEFAULT_PREFERENCES_HIGHLIGHTLIST_EXTERNAL FALSE
 #define CONF_DEFAULT_PREFERENCES_ALARMLIST_ENABLED      FALSE
+#define CONF_DEFAULT_PREFERENCES_ALARMLIST_EXTERNAL     FALSE
 #define CONF_DEFAULT_PREFERENCES_LOCATION_LATITUDE      NAN
 #define CONF_DEFAULT_PREFERENCES_LOCATION_LONGITUDE     NAN
 #define CONF_DEFAULT_PREFERENCES_LOCATION_MTSCAN        FALSE
@@ -153,6 +155,7 @@ typedef struct conf
     gboolean  preferences_no_style_override;
     gboolean  preferences_signals;
     gboolean  preferences_display_time_only;
+    gboolean  preferences_reconnect;
 
     gchar   **preferences_view_cols_order;
     gchar   **preferences_view_cols_hidden;
@@ -166,9 +169,7 @@ typedef struct conf
     gboolean  preferences_events_new_network;
     gchar    *preferences_events_new_network_exec;
 
-    mtscan_conf_tzsp_mode_t  preferences_tzsp_mode;
     gint                     preferences_tzsp_udp_port;
-    gchar                   *preferences_tzsp_interface;
     gint                     preferences_tzsp_channel_width;
     mtscan_conf_tzsp_band_t  preferences_tzsp_band;
 
@@ -185,14 +186,23 @@ typedef struct conf
 
     gboolean  preferences_blacklist_enabled;
     gboolean  preferences_blacklist_inverted;
+    gboolean  preferences_blacklist_external;
+    gchar    *preferences_blacklist_ext_path;
     GTree    *blacklist;
+    GTree    *blacklist_ext;
 
     gboolean  preferences_highlightlist_enabled;
     gboolean  preferences_highlightlist_inverted;
+    gboolean  preferences_highlightlist_external;
+    gchar    *preferences_highlightlist_ext_path;
     GTree    *highlightlist;
+    GTree    *highlightlist_ext;
 
     gboolean  preferences_alarmlist_enabled;
+    gboolean  preferences_alarmlist_external;
+    gchar    *preferences_alarmlist_ext_path;
     GTree    *alarmlist;
+    GTree    *alarmlist_ext;
 
     gdouble    preferences_location_latitude;
     gdouble    preferences_location_longitude;
@@ -250,9 +260,22 @@ conf_init(const gchar *custom_path)
 
     conf.keyfile = g_key_file_new();
     conf.blacklist = g_tree_new_full((GCompareDataFunc)gint64cmp, NULL, g_free, NULL);
+    conf.blacklist_ext = g_tree_new_full((GCompareDataFunc)gint64cmp, NULL, g_free, NULL);
+
     conf.highlightlist = g_tree_new_full((GCompareDataFunc)gint64cmp, NULL, g_free, NULL);
+    conf.highlightlist_ext = g_tree_new_full((GCompareDataFunc)gint64cmp, NULL, g_free, NULL);
+
     conf.alarmlist = g_tree_new_full((GCompareDataFunc)gint64cmp, NULL, g_free, NULL);
+    conf.alarmlist_ext = g_tree_new_full((GCompareDataFunc)gint64cmp, NULL, g_free, NULL);
+
     conf_read();
+
+    if(conf_get_preferences_blacklist_external())
+        conf_extlist_load(conf.blacklist_ext, conf_get_preferences_blacklist_ext_path());
+    if(conf_get_preferences_highlightlist_external())
+        conf_extlist_load(conf.highlightlist_ext, conf_get_preferences_highlightlist_ext_path());
+    if(conf_get_preferences_alarmlist_external())
+        conf_extlist_load(conf.alarmlist_ext, conf_get_preferences_alarmlist_ext_path());
 }
 
 static void
@@ -303,6 +326,7 @@ conf_read(void)
     conf.preferences_no_style_override = conf_read_boolean("preferences", "no_style_override", CONF_DEFAULT_PREFERENCES_NO_STYLE_OVERRIDE);
     conf.preferences_signals = conf_read_boolean("preferences", "signals", CONF_DEFAULT_PREFERENCES_SIGNALS);
     conf.preferences_display_time_only = conf_read_boolean("preferences", "display_time_only", CONF_DEFAULT_PREFERENCES_DISPLAY_TIME_ONLY);
+    conf.preferences_reconnect = conf_read_boolean("preferences", "reconnect", CONF_DEFAULT_PREFERENCES_RECONNECT);
 
     conf.preferences_view_cols_order = conf_read_columns(conf.keyfile, "preferences", "view_cols_order");
     conf.preferences_view_cols_hidden = conf_read_string_list(conf.keyfile, "preferences", "view_cols_hidden", NULL);
@@ -316,9 +340,7 @@ conf_read(void)
     conf.preferences_events_new_network = conf_read_boolean("preferences", "events_new_network", CONF_DEFAULT_PREFERENCES_EVENTS_NEW_NETWORK);
     conf.preferences_events_new_network_exec = conf_read_string("preferences", "events_new_network_exec", "");
 
-    conf.preferences_tzsp_mode = (mtscan_conf_tzsp_mode_t)conf_read_integer("preferences", "tzsp_mode", CONF_DEFAULT_PREFERENCES_TZSP_MODE);
     conf.preferences_tzsp_udp_port = conf_read_integer("preferences", "tzsp_udp_port", CONF_DEFAULT_PREFERENCES_TZSP_UDP_PORT);
-    conf.preferences_tzsp_interface = conf_read_string("preferences", "tzsp_interface", CONF_DEFAULT_PREFERENCES_TZSP_INTERFACE);
     conf.preferences_tzsp_channel_width = conf_read_integer("preferences", "tzsp_channel_width", CONF_DEFAULT_PREFERENCES_TZSP_CHANNEL_WIDTH);
     conf.preferences_tzsp_band = (mtscan_conf_tzsp_band_t)conf_read_integer("preferences", "tzsp_band", CONF_DEFAULT_PREFERENCES_TZSP_BAND);
 
@@ -335,13 +357,19 @@ conf_read(void)
 
     conf.preferences_blacklist_enabled = conf_read_boolean("preferences", "blacklist_enabled", CONF_DEFAULT_PREFERENCES_BLACKLIST_ENABLED);
     conf.preferences_blacklist_inverted = conf_read_boolean("preferences", "blacklist_inverted", CONF_DEFAULT_PREFERENCES_BLACKLIST_INVERTED);
+    conf.preferences_blacklist_external = conf_read_boolean("preferences", "blacklist_external", CONF_DEFAULT_PREFERENCES_BLACKLIST_EXTERNAL);
+    conf.preferences_blacklist_ext_path = conf_read_string("preferences", "blacklist_ext_path", "");
     conf_read_gint64_tree(conf.keyfile, "preferences", "blacklist", conf.blacklist);
 
     conf.preferences_highlightlist_enabled = conf_read_boolean("preferences", "highlightlist_enabled", CONF_DEFAULT_PREFERENCES_HIGHLIGHTLIST_ENABLED);
     conf.preferences_highlightlist_inverted = conf_read_boolean("preferences", "highlightlist_inverted", CONF_DEFAULT_PREFERENCES_HIGHLIGHTLIST_INVERTED);
+    conf.preferences_highlightlist_external = conf_read_boolean("preferences", "highlightlist_external", CONF_DEFAULT_PREFERENCES_HIGHLIGHTLIST_EXTERNAL);
+    conf.preferences_highlightlist_ext_path = conf_read_string("preferences", "highlightlist_ext_path", "");
     conf_read_gint64_tree(conf.keyfile, "preferences", "highlightlist", conf.highlightlist);
 
     conf.preferences_alarmlist_enabled = conf_read_boolean("preferences", "alarmlist_enabled", CONF_DEFAULT_PREFERENCES_ALARMLIST_ENABLED);
+    conf.preferences_alarmlist_external = conf_read_boolean("preferences", "alarmlist_external", CONF_DEFAULT_PREFERENCES_ALARMLIST_EXTERNAL);
+    conf.preferences_alarmlist_ext_path = conf_read_string("preferences", "alarmlist_ext_path", "");
     conf_read_gint64_tree(conf.keyfile, "preferences", "alarmlist", conf.alarmlist);
 
     conf.preferences_location_latitude = conf_read_double("preferences", "location_latitude", CONF_DEFAULT_PREFERENCES_LOCATION_LATITUDE);
@@ -354,7 +382,6 @@ conf_read(void)
     conf.preferences_location_azimuth_error = conf_read_integer("preferences", "location_azimuth_error", CONF_DEFAULT_PREFERENCES_LOCATION_AZIMUTH_ERROR);
     conf.preferences_location_min_distance = conf_read_integer("preferences", "location_min_distance", CONF_DEFAULT_PREFERENCES_LOCATION_MIN_DISTANCE);
     conf.preferences_location_max_distance = conf_read_integer("preferences", "location_max_distance", CONF_DEFAULT_PREFERENCES_LOCATION_MAX_DISTANCE);
-
 
     if(!file_exists)
         conf_save();
@@ -540,8 +567,7 @@ conf_read_profile(const gchar *group_name)
                          conf_read_integer(group_name, "duration_time", CONF_DEFAULT_PROFILE_DURATION_TIME),
                          conf_read_boolean(group_name, "duration", CONF_DEFAULT_PROFILE_DURATION),
                          conf_read_boolean(group_name, "remote", CONF_DEFAULT_PROFILE_REMOTE),
-                         conf_read_boolean(group_name, "background", CONF_DEFAULT_PROFILE_BACKGROUND),
-                         conf_read_boolean(group_name, "reconnect", CONF_DEFAULT_PROFILE_RECONNECT));
+                         conf_read_boolean(group_name, "background", CONF_DEFAULT_PROFILE_BACKGROUND));
     return p;
 }
 
@@ -560,7 +586,8 @@ conf_read_scanlist(const gchar *group_name)
     conf_scanlist_t *sl;
     sl = conf_scanlist_new(conf_read_string(group_name, "name", CONF_DEFAULT_SCANLIST_NAME),
                            conf_read_string(group_name, "data", CONF_DEFAULT_SCANLIST_DATA),
-                           conf_read_boolean(group_name, "main", FALSE));
+                           conf_read_boolean(group_name, "main", FALSE),
+                           conf_read_boolean(group_name, "default", FALSE));
 
     return sl;
 }
@@ -628,6 +655,7 @@ conf_save(void)
     g_key_file_set_boolean(conf.keyfile, "preferences", "no_style_override", conf.preferences_no_style_override);
     g_key_file_set_boolean(conf.keyfile, "preferences", "signals", conf.preferences_signals);
     g_key_file_set_boolean(conf.keyfile, "preferences", "display_time_only", conf.preferences_display_time_only);
+    g_key_file_set_boolean(conf.keyfile, "preferences", "reconnect", conf.preferences_reconnect);
 
     g_key_file_set_string_list(conf.keyfile, "preferences", "view_cols_order",
                                (const gchar * const *)conf.preferences_view_cols_order, g_strv_length(conf.preferences_view_cols_order));
@@ -643,9 +671,7 @@ conf_save(void)
     g_key_file_set_boolean(conf.keyfile, "preferences", "events_new_network", conf.preferences_events_new_network);
     g_key_file_set_string(conf.keyfile, "preferences", "events_new_network_exec", conf.preferences_events_new_network_exec);
 
-    g_key_file_set_integer(conf.keyfile, "preferences", "tzsp_mode", conf.preferences_tzsp_mode);
     g_key_file_set_integer(conf.keyfile, "preferences", "tzsp_udp_port", conf.preferences_tzsp_udp_port);
-    g_key_file_set_string(conf.keyfile, "preferences", "tzsp_interface", conf.preferences_tzsp_interface);
     g_key_file_set_integer(conf.keyfile, "preferences", "tzsp_channel_width", conf.preferences_tzsp_channel_width);
     g_key_file_set_integer(conf.keyfile, "preferences", "tzsp_band", conf.preferences_tzsp_band);
 
@@ -662,13 +688,19 @@ conf_save(void)
 
     g_key_file_set_boolean(conf.keyfile, "preferences", "blacklist_enabled", conf.preferences_blacklist_enabled);
     g_key_file_set_boolean(conf.keyfile, "preferences", "blacklist_inverted", conf.preferences_blacklist_inverted);
+    g_key_file_set_boolean(conf.keyfile, "preferences", "blacklist_external", conf.preferences_blacklist_external);
+    g_key_file_set_string(conf.keyfile, "preferences", "blacklist_ext_path", conf.preferences_blacklist_ext_path);
     conf_save_gint64_tree(conf.keyfile, "preferences", "blacklist", conf.blacklist);
 
     g_key_file_set_boolean(conf.keyfile, "preferences", "highlightlist_enabled", conf.preferences_highlightlist_enabled);
     g_key_file_set_boolean(conf.keyfile, "preferences", "highlightlist_inverted", conf.preferences_highlightlist_inverted);
+    g_key_file_set_boolean(conf.keyfile, "preferences", "highlightlist_external", conf.preferences_highlightlist_external);
+    g_key_file_set_string(conf.keyfile, "preferences", "highlightlist_ext_path", conf.preferences_highlightlist_ext_path);
     conf_save_gint64_tree(conf.keyfile, "preferences", "highlightlist", conf.highlightlist);
 
     g_key_file_set_boolean(conf.keyfile, "preferences", "alarmlist_enabled", conf.preferences_alarmlist_enabled);
+    g_key_file_set_boolean(conf.keyfile, "preferences", "alarmlist_external", conf.preferences_alarmlist_external);
+    g_key_file_set_string(conf.keyfile, "preferences", "alarmlist_ext_path", conf.preferences_alarmlist_ext_path);
     conf_save_gint64_tree(conf.keyfile, "preferences", "alarmlist", conf.alarmlist);
 
     g_key_file_set_double(conf.keyfile, "preferences", "location_latitude", conf.preferences_location_latitude);
@@ -762,7 +794,6 @@ conf_save_profile(GKeyFile             *keyfile,
     g_key_file_set_boolean(keyfile, group_name, "duration", conf_profile_get_duration(p));
     g_key_file_set_boolean(keyfile, group_name, "remote", conf_profile_get_remote(p));
     g_key_file_set_boolean(keyfile, group_name, "background", conf_profile_get_background(p));
-    g_key_file_set_boolean(keyfile, group_name, "reconnect", conf_profile_get_reconnect(p));
 }
 
 static gboolean
@@ -792,6 +823,8 @@ conf_save_scanlist(GKeyFile              *keyfile,
     g_key_file_set_string(keyfile, group_name, "data", conf_scanlist_get_data(sl));
     if(conf_scanlist_get_main(sl))
         g_key_file_set_boolean(keyfile, group_name, "main", TRUE);
+    if(conf_scanlist_get_default(sl))
+        g_key_file_set_boolean(keyfile, group_name, "default", TRUE);
 }
 
 static void
@@ -1147,6 +1180,18 @@ conf_set_preferences_display_time_only(gboolean value)
     conf.preferences_display_time_only = value;
 }
 
+gboolean
+conf_get_preferences_reconnect(void)
+{
+    return conf.preferences_reconnect;
+}
+
+void
+conf_set_preferences_reconnect(gboolean reconnect)
+{
+    conf.preferences_reconnect = reconnect;
+}
+
 const gchar* const*
 conf_get_preferences_view_cols_order(void)
 {
@@ -1257,18 +1302,6 @@ conf_set_preferences_events_new_network_exec(const gchar *value)
     conf_change_string(&conf.preferences_events_new_network_exec, value);
 }
 
-mtscan_conf_tzsp_mode_t
-conf_get_preferences_tzsp_mode(void)
-{
-    return conf.preferences_tzsp_mode;
-}
-
-void
-conf_set_preferences_tzsp_mode(mtscan_conf_tzsp_mode_t value)
-{
-    conf.preferences_tzsp_mode = value;
-}
-
 gint
 conf_get_preferences_tzsp_udp_port(void)
 {
@@ -1279,18 +1312,6 @@ void
 conf_set_preferences_tzsp_udp_port(gint value)
 {
     conf.preferences_tzsp_udp_port = value;
-}
-
-const gchar*
-conf_get_preferences_tzsp_interface(void)
-{
-    return conf.preferences_tzsp_interface;
-}
-
-void
-conf_set_preferences_tzsp_interface(const gchar *value)
-{
-    conf_change_string(&conf.preferences_tzsp_interface, value);
 }
 
 gint
@@ -1450,15 +1471,43 @@ conf_set_preferences_blacklist_inverted(gboolean value)
 }
 
 gboolean
+conf_get_preferences_blacklist_external(void)
+{
+    return conf.preferences_blacklist_external;
+}
+
+void
+conf_set_preferences_blacklist_external(gboolean value)
+{
+    conf.preferences_blacklist_external = value;
+}
+
+const gchar*
+conf_get_preferences_blacklist_ext_path(void)
+{
+    return conf.preferences_blacklist_ext_path;
+}
+
+void
+conf_set_preferences_blacklist_ext_path(const gchar *path)
+{
+    conf_change_string(&conf.preferences_blacklist_ext_path, path);
+}
+
+gboolean
 conf_get_preferences_blacklist(gint64 value)
 {
-    gboolean found = GPOINTER_TO_INT(g_tree_lookup(conf.blacklist, &value));
+    GTree *list = conf.preferences_blacklist_external ? conf.blacklist_ext : conf.blacklist;
+    gboolean found = GPOINTER_TO_INT(g_tree_lookup(list, &value));
     return (conf.preferences_blacklist_inverted ? !found : found);
 }
 
 void
 conf_set_preferences_blacklist(gint64 value)
 {
+    if(conf.preferences_blacklist_external)
+        return;
+
     if(!conf.preferences_blacklist_inverted)
         g_tree_insert(conf.blacklist, gint64dup(&value), GINT_TO_POINTER(TRUE));
     else
@@ -1468,6 +1517,9 @@ conf_set_preferences_blacklist(gint64 value)
 void
 conf_del_preferences_blacklist(gint64 value)
 {
+    if(conf.preferences_blacklist_external)
+        return;
+
     if(!conf.preferences_blacklist_inverted)
         g_tree_remove(conf.blacklist, &value);
     else
@@ -1511,15 +1563,43 @@ conf_set_preferences_highlightlist_inverted(gboolean value)
 }
 
 gboolean
+conf_get_preferences_highlightlist_external(void)
+{
+    return conf.preferences_highlightlist_external;
+}
+
+void
+conf_set_preferences_highlightlist_external(gboolean value)
+{
+    conf.preferences_highlightlist_external = value;
+}
+
+const gchar*
+conf_get_preferences_highlightlist_ext_path(void)
+{
+    return conf.preferences_highlightlist_ext_path;
+}
+
+void
+conf_set_preferences_highlightlist_ext_path(const gchar *path)
+{
+    conf_change_string(&conf.preferences_highlightlist_ext_path, path);
+}
+
+gboolean
 conf_get_preferences_highlightlist(gint64 value)
 {
-    gboolean found = GPOINTER_TO_INT(g_tree_lookup(conf.highlightlist, &value));
+    GTree *list = conf.preferences_highlightlist_external ? conf.highlightlist_ext : conf.highlightlist;
+    gboolean found = GPOINTER_TO_INT(g_tree_lookup(list, &value));
     return (conf.preferences_highlightlist_inverted ? !found : found);
 }
 
 void
 conf_set_preferences_highlightlist(gint64 value)
 {
+    if(conf.preferences_highlightlist_external)
+        return;
+
     if(!conf.preferences_highlightlist_inverted)
         g_tree_insert(conf.highlightlist, gint64dup(&value), GINT_TO_POINTER(TRUE));
     else
@@ -1529,6 +1609,9 @@ conf_set_preferences_highlightlist(gint64 value)
 void
 conf_del_preferences_highlightlist(gint64 value)
 {
+    if(conf.preferences_highlightlist_external)
+        return;
+
     if(!conf.preferences_highlightlist_inverted)
         g_tree_remove(conf.highlightlist, &value);
     else
@@ -1560,21 +1643,52 @@ conf_set_preferences_alarmlist_enabled(gboolean value)
 }
 
 gboolean
+conf_get_preferences_alarmlist_external(void)
+{
+    return conf.preferences_alarmlist_external;
+}
+
+void
+conf_set_preferences_alarmlist_external(gboolean value)
+{
+    conf.preferences_alarmlist_external = value;
+}
+
+const gchar*
+conf_get_preferences_alarmlist_ext_path(void)
+{
+    return conf.preferences_alarmlist_ext_path;
+}
+
+void
+conf_set_preferences_alarmlist_ext_path(const gchar *path)
+{
+    conf_change_string(&conf.preferences_alarmlist_ext_path, path);
+}
+
+gboolean
 conf_get_preferences_alarmlist(gint64 value)
 {
-    gboolean found = GPOINTER_TO_INT(g_tree_lookup(conf.alarmlist, &value));
+    GTree *list = conf.preferences_alarmlist_external ? conf.alarmlist_ext : conf.alarmlist;
+    gboolean found = GPOINTER_TO_INT(g_tree_lookup(list, &value));
     return found;
 }
 
 void
 conf_set_preferences_alarmlist(gint64 value)
 {
+    if(conf.preferences_alarmlist_external)
+        return;
+
     g_tree_insert(conf.alarmlist, gint64dup(&value), GINT_TO_POINTER(TRUE));
 }
 
 void
 conf_del_preferences_alarmlist(gint64 value)
 {
+    if(conf.preferences_alarmlist_external)
+        return;
+
     g_tree_remove(conf.alarmlist, &value);
 }
 

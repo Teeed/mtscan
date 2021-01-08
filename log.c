@@ -1,6 +1,6 @@
 /*
  *  MTscan - MikroTik RouterOS wireless scanner
- *  Copyright (c) 2015-2019  Konrad Kosmatka
+ *  Copyright (c) 2015-2020  Konrad Kosmatka
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License
@@ -454,7 +454,7 @@ parse_array_end(gpointer ptr)
 }
 
 log_save_error_t*
-log_save(gchar       *filename,
+log_save(const gchar *filename,
          gboolean     strip_signals,
          gboolean     strip_gps,
          gboolean     strip_azi,
@@ -478,7 +478,7 @@ log_save(gchar       *filename,
     }
 
     ext = strrchr(filename, '.');
-    ctx.fp = g_fopen(filename, "w");
+    ctx.fp = g_fopen(filename, "wb");
 
     if(!ctx.fp)
     {
@@ -545,6 +545,7 @@ log_save(gchar       *filename,
         return ret;
     }
 
+    g_free(tmp_name);
     return NULL;
 }
 

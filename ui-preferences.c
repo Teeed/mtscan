@@ -21,7 +21,6 @@
 #include "gps.h"
 #include "ui-dialogs.h"
 #include "misc.h"
-#include "ui-dialog-pcap.h"
 #include "ui-callbacks.h"
 
 enum
@@ -44,6 +43,8 @@ typedef struct ui_preferences_list
     GtkWidget *b_add;
     GtkWidget *b_remove;
     GtkWidget *b_clear;
+    GtkWidget *x_external;
+    GtkWidget *c_ext_path;
 } ui_preferences_list_t;
 
 typedef struct ui_preferences
@@ -71,6 +72,7 @@ typedef struct ui_preferences
     GtkWidget *x_general_no_style_override;
     GtkWidget *x_general_signals;
     GtkWidget *x_general_display_time_only;
+    GtkWidget *x_general_reconnect;
 
     GtkWidget *page_view;
     GtkWidget *v_view;
@@ -158,9 +160,6 @@ typedef struct ui_preferences
 } ui_preferences_t;
 
 static void ui_preferences_view_toggled(GtkCellRendererToggle*, gchar*, gpointer);
-static void ui_preferences_tzsp_mode_callback(GtkWidget*, gpointer);
-static void ui_preferences_tzsp_interface(GtkWidget*, gpointer);
-static void ui_preferences_tzsp_interface_callback(const gchar*, gpointer);
 
 static void ui_preferences_list_create(ui_preferences_list_t*, GtkWidget*, const gchar*, const gchar*, const gchar*);
 static void ui_preferences_list_format(GtkTreeViewColumn*, GtkCellRenderer*, GtkTreeModel*, GtkTreeIter*, gpointer);
@@ -171,6 +170,7 @@ static gboolean ui_preferences_key_list_add(GtkWidget*, GdkEventKey*, gpointer);
 static void ui_preferences_list_add(GtkWidget*, gpointer);
 static void ui_preferences_list_remove(GtkWidget*, gpointer);
 static void ui_preferences_list_clear(GtkWidget*, gpointer);
+static void ui_preferences_list_ext_toggled(GtkWidget*, gpointer);
 static void ui_preferences_file_add(GtkWidget*, gpointer);
 static void ui_preferences_location_acquire(GtkWidget*, gpointer);
 static void ui_preferences_load(ui_preferences_t*);
@@ -209,7 +209,7 @@ ui_preferences_dialog(void)
     gtk_notebook_append_page(GTK_NOTEBOOK(p.notebook), p.page_general, gtk_label_new("General"));
     gtk_container_child_set(GTK_CONTAINER(p.notebook), p.page_general, "tab-expand", FALSE, "tab-fill", FALSE, NULL);
 
-    p.table_general = gtk_table_new(9, 3, TRUE);
+    p.table_general = gtk_table_new(10, 3, TRUE);
     gtk_table_set_homogeneous(GTK_TABLE(p.table_general), FALSE);
     gtk_table_set_row_spacings(GTK_TABLE(p.table_general), 4);
     gtk_table_set_col_spacings(GTK_TABLE(p.table_general), 4);
@@ -275,6 +275,10 @@ ui_preferences_dialog(void)
     row++;
     p.x_general_display_time_only = gtk_check_button_new_with_label("Display time only");
     gtk_table_attach(GTK_TABLE(p.table_general), p.x_general_display_time_only, 0, 3, row, row+1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
+
+    row++;
+    p.x_general_reconnect = gtk_check_button_new_with_label("Automatic reconnect");
+    gtk_table_attach(GTK_TABLE(p.table_general), p.x_general_reconnect, 0, 3, row, row+1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
     /* View */
     p.page_view = gtk_vbox_new(FALSE, 5);
@@ -377,35 +381,11 @@ ui_preferences_dialog(void)
     gtk_box_pack_start(GTK_BOX(p.page_tzsp), p.table_tzsp, TRUE, TRUE, 1);
 
     row = 0;
-    p.l_tzsp_mode = gtk_label_new("Streaming mode:");
-    gtk_misc_set_alignment(GTK_MISC(p.l_tzsp_mode), 0.0, 0.5);
-    gtk_table_attach(GTK_TABLE(p.table_tzsp), p.l_tzsp_mode, 0, 1, row, row+1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
-    p.box_tzsp_mode = gtk_hbox_new(FALSE, 6);
-    p.r_tzsp_mode_socket = gtk_radio_button_new_with_label(NULL, "socket");
-    gtk_box_pack_start(GTK_BOX(p.box_tzsp_mode), p.r_tzsp_mode_socket, FALSE, FALSE, 0);
-    p.r_tzsp_mode_pcap = gtk_radio_button_new_with_label_from_widget(GTK_RADIO_BUTTON(p.r_tzsp_mode_socket), "pcap");
-    gtk_box_pack_start(GTK_BOX(p.box_tzsp_mode), p.r_tzsp_mode_pcap, FALSE, FALSE, 0);
-    gtk_table_attach(GTK_TABLE(p.table_tzsp), p.box_tzsp_mode, 1, 3, row, row+1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
-    g_signal_connect(p.r_tzsp_mode_pcap, "toggled", G_CALLBACK(ui_preferences_tzsp_mode_callback), &p);
-
-    row++;
     p.l_tzsp_udp_port = gtk_label_new("UDP port:");
     gtk_misc_set_alignment(GTK_MISC(p.l_tzsp_udp_port), 0.0, 0.5);
     gtk_table_attach(GTK_TABLE(p.table_tzsp), p.l_tzsp_udp_port, 0, 1, row, row+1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
     p.s_tzsp_udp_port = gtk_spin_button_new(GTK_ADJUSTMENT(gtk_adjustment_new(0.0, 1024.0, 65535.0, 1.0, 10.0, 0.0)), 0, 0);
     gtk_table_attach(GTK_TABLE(p.table_tzsp), p.s_tzsp_udp_port, 1, 3, row, row+1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
-
-    row++;
-    p.l_tzsp_interface = gtk_label_new("Pcap interface:");
-    gtk_misc_set_alignment(GTK_MISC(p.l_tzsp_interface), 0.0, 0.5);
-    gtk_table_attach(GTK_TABLE(p.table_tzsp), p.l_tzsp_interface, 0, 1, row, row+1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
-    p.box_tzsp_interface = gtk_hbox_new(FALSE, 0);
-    p.e_tzsp_interface = gtk_entry_new();
-    gtk_box_pack_start(GTK_BOX(p.box_tzsp_interface), p.e_tzsp_interface, TRUE, TRUE, 0);
-    p.b_tzsp_interface = gtk_button_new_with_label("...");
-    g_signal_connect(p.b_tzsp_interface, "clicked", G_CALLBACK(ui_preferences_tzsp_interface), &p);
-    gtk_box_pack_start(GTK_BOX(p.box_tzsp_interface), p.b_tzsp_interface, FALSE, FALSE, 0);
-    gtk_table_attach(GTK_TABLE(p.table_tzsp), p.box_tzsp_interface, 1, 3, row, row+1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
     row++;
     p.l_tzsp_channel_width = gtk_label_new("Channel width:");
@@ -428,7 +408,7 @@ ui_preferences_dialog(void)
     gtk_table_attach(GTK_TABLE(p.table_tzsp), p.box_tzsp_band, 1, 3, row, row+1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
     p.box_tzsp_info = gtk_hbox_new(FALSE, 5);
-    p.i_tzsp_info = gtk_image_new_from_icon_name("gtk-dialog-warning", GTK_ICON_SIZE_MENU);
+    p.i_tzsp_info = gtk_image_new_from_icon_name("dialog-warning", GTK_ICON_SIZE_MENU);
     gtk_box_pack_start(GTK_BOX(p.box_tzsp_info), p.i_tzsp_info, FALSE, FALSE, 1);
     p.l_tzsp_info = gtk_label_new(NULL);
     gtk_label_set_line_wrap(GTK_LABEL(p.l_tzsp_info), TRUE);
@@ -469,6 +449,7 @@ ui_preferences_dialog(void)
     row++;
     p.x_gps_show_errors = gtk_check_button_new_with_label("Show error estimates");
     gtk_table_attach(GTK_TABLE(p.table_gps), p.x_gps_show_errors, 0, 2, row, row+1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
+
 
     /* Blacklist */
     ui_preferences_list_create(&p.blacklist, p.notebook, "Blacklist", "Enable blacklist", "Invert to whitelist");
@@ -619,35 +600,6 @@ ui_preferences_view_toggled(GtkCellRendererToggle *cell,
 }
 
 static void
-ui_preferences_tzsp_mode_callback(GtkWidget *widget,
-                                  gpointer   user_data)
-{
-    ui_preferences_t *p = (ui_preferences_t*)user_data;
-    gboolean sensitive = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
-
-    gtk_widget_set_sensitive(p->e_tzsp_interface, sensitive);
-    gtk_widget_set_sensitive(p->b_tzsp_interface, sensitive);
-}
-
-static void
-ui_preferences_tzsp_interface(GtkWidget *widget,
-                              gpointer   user_data)
-{
-    ui_preferences_t *p = (ui_preferences_t*)user_data;
-
-    ui_dialog_pcap_new(GTK_WINDOW(p->window), ui_preferences_tzsp_interface_callback, p->e_tzsp_interface);
-}
-
-static void
-ui_preferences_tzsp_interface_callback(const gchar *name,
-                                       gpointer     user_data)
-{
-    GtkEntry *entry = GTK_ENTRY(user_data);
-
-    gtk_entry_set_text(entry, name);
-}
-
-static void
 ui_preferences_list_create(ui_preferences_list_t *l,
                            GtkWidget             *notebook,
                            const gchar           *title,
@@ -656,6 +608,9 @@ ui_preferences_list_create(ui_preferences_list_t *l,
 {
     GtkTreeViewColumn *column;
     GtkCellRenderer *renderer;
+    GtkFileFilter *filter;
+    GtkFileFilter *filter_all;
+
 
     l->page = gtk_vbox_new(FALSE, 5);
     gtk_container_set_border_width(GTK_CONTAINER(l->page), 4);
@@ -709,6 +664,24 @@ ui_preferences_list_create(ui_preferences_list_t *l,
     l->b_clear = gtk_button_new_from_stock(GTK_STOCK_CLEAR);
     g_signal_connect(l->b_clear, "clicked", G_CALLBACK(ui_preferences_list_clear), l->view);
     gtk_box_pack_start(GTK_BOX(l->box_buttons), l->b_clear, TRUE, TRUE, 0);
+
+    l->x_external = gtk_check_button_new_with_label("Load networks from a MTscan log on startup");
+    gtk_box_pack_start(GTK_BOX(l->box), l->x_external, FALSE, FALSE, 0);
+    g_signal_connect(l->x_external, "toggled", G_CALLBACK(ui_preferences_list_ext_toggled), (gpointer)l);
+
+    l->c_ext_path = gtk_file_chooser_button_new("MTscan log", GTK_FILE_CHOOSER_ACTION_OPEN);
+    gtk_box_pack_start(GTK_BOX(l->box), l->c_ext_path, FALSE, FALSE, 0);
+
+    filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(filter, APP_NAME " file");
+    gtk_file_filter_add_pattern(filter, "*" APP_FILE_EXT);
+    gtk_file_filter_add_pattern(filter, "*" APP_FILE_EXT APP_FILE_COMPRESS);
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(l->c_ext_path), filter);
+
+    filter_all = gtk_file_filter_new();
+    gtk_file_filter_set_name(filter_all, "All files");
+    gtk_file_filter_add_pattern(filter_all, "*");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(l->c_ext_path), filter_all);
 }
 
 static void
@@ -866,6 +839,21 @@ ui_preferences_list_clear(GtkWidget *widget,
 }
 
 static void
+ui_preferences_list_ext_toggled(GtkWidget *widget,
+                                gpointer   data)
+{
+    ui_preferences_list_t *list = (ui_preferences_list_t*)data;
+    gboolean state = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
+
+    gtk_widget_set_sensitive(list->b_add, !state);
+    gtk_widget_set_sensitive(list->b_remove, !state);
+    gtk_widget_set_sensitive(list->b_clear, !state);
+    gtk_widget_set_sensitive(list->view, !state);
+
+    gtk_widget_set_sensitive(list->c_ext_path, state);
+}
+
+static void
 ui_preferences_file_add(GtkWidget *widget,
                         gpointer   data)
 {
@@ -921,6 +909,7 @@ ui_preferences_load(ui_preferences_t *p)
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->x_general_no_style_override), conf_get_preferences_no_style_override());
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->x_general_signals), conf_get_preferences_signals());
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->x_general_display_time_only), conf_get_preferences_display_time_only());
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->x_general_reconnect), conf_get_preferences_reconnect());
 
     /* View */
     ui_preferences_load_view(p, conf_get_preferences_view_cols_order(), conf_get_preferences_view_cols_hidden());
@@ -938,11 +927,7 @@ ui_preferences_load(ui_preferences_t *p)
         gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(p->c_events_new_network), conf_get_preferences_events_new_network_exec());
 
     /* TZSP */
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->r_tzsp_mode_socket), conf_get_preferences_tzsp_mode() == MTSCAN_CONF_TZSP_MODE_SOCKET);
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->r_tzsp_mode_pcap), conf_get_preferences_tzsp_mode() == MTSCAN_CONF_TZSP_MODE_PCAP);
-    ui_preferences_tzsp_mode_callback(p->r_tzsp_mode_pcap, p); /* force 'toggled' signal */
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(p->s_tzsp_udp_port), conf_get_preferences_tzsp_udp_port());
-    gtk_entry_set_text(GTK_ENTRY(p->e_tzsp_interface), conf_get_preferences_tzsp_interface());
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(p->s_tzsp_channel_width), conf_get_preferences_tzsp_channel_width());
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->r_tzsp_band_2g), conf_get_preferences_tzsp_band() == MTSCAN_CONF_TZSP_BAND_2GHZ);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->r_tzsp_band_5g), conf_get_preferences_tzsp_band() == MTSCAN_CONF_TZSP_BAND_5GHZ);
@@ -959,6 +944,9 @@ ui_preferences_load(ui_preferences_t *p)
     model = conf_get_preferences_blacklist_as_liststore();
     gtk_tree_view_set_model(GTK_TREE_VIEW(p->blacklist.view), GTK_TREE_MODEL(model));
     g_object_unref(model);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->blacklist.x_external), conf_get_preferences_blacklist_external());
+    if(strlen(conf_get_preferences_blacklist_ext_path()))
+        gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(p->blacklist.c_ext_path), conf_get_preferences_blacklist_ext_path());
 
     /* Highlight list */
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->highlightlist.x_enabled), conf_get_preferences_highlightlist_enabled());
@@ -966,12 +954,18 @@ ui_preferences_load(ui_preferences_t *p)
     model = conf_get_preferences_highlightlist_as_liststore();
     gtk_tree_view_set_model(GTK_TREE_VIEW(p->highlightlist.view), GTK_TREE_MODEL(model));
     g_object_unref(model);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->highlightlist.x_external), conf_get_preferences_highlightlist_external());
+    if(strlen(conf_get_preferences_highlightlist_ext_path()))
+        gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(p->highlightlist.c_ext_path), conf_get_preferences_highlightlist_ext_path());
 
     /* Alarm list */
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->alarmlist.x_enabled), conf_get_preferences_alarmlist_enabled());
     model = conf_get_preferences_alarmlist_as_liststore();
     gtk_tree_view_set_model(GTK_TREE_VIEW(p->alarmlist.view), GTK_TREE_MODEL(model));
     g_object_unref(model);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(p->alarmlist.x_external), conf_get_preferences_alarmlist_external());
+    if(strlen(conf_get_preferences_alarmlist_ext_path()))
+        gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(p->alarmlist.c_ext_path), conf_get_preferences_alarmlist_ext_path());
 
     /* Location */
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(p->s_location_latitude), conf_get_preferences_location_latitude());
@@ -1026,14 +1020,13 @@ ui_preferences_apply(GtkWidget *widget,
     gchar *new_screenshot_directory;
     gint new_search_column;
     gboolean new_no_style_override;
-    mtscan_conf_tzsp_mode_t new_tzsp_mode;
     gchar *new_network_exec;
     gint new_tzsp_udp_port;
-    const gchar *new_tzsp_interface;
     gint new_tzsp_channel_width;
     mtscan_conf_tzsp_band_t new_tzsp_band;
     const gchar *new_gps_hostname;
     gint new_gps_tcp_port;
+    gchar *ext_path;
     gdouble new_location_latitude;
     gdouble new_location_longitude;
     gboolean new_location_mtscan;
@@ -1082,6 +1075,7 @@ ui_preferences_apply(GtkWidget *widget,
 
     conf_set_preferences_signals(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->x_general_signals)));
     conf_set_preferences_display_time_only(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->x_general_display_time_only)));
+    conf_set_preferences_reconnect(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->x_general_reconnect)));
 
     /* View */
     ui_preferences_apply_view(p);
@@ -1100,25 +1094,19 @@ ui_preferences_apply(GtkWidget *widget,
     g_free(new_network_exec);
 
     /* TZSP */
-    new_tzsp_mode = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->r_tzsp_mode_pcap)) ? MTSCAN_CONF_TZSP_MODE_PCAP : MTSCAN_CONF_TZSP_MODE_SOCKET;
     new_tzsp_udp_port = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(p->s_tzsp_udp_port));
-    new_tzsp_interface = gtk_entry_get_text(GTK_ENTRY(p->e_tzsp_interface));
     new_tzsp_channel_width = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(p->s_tzsp_channel_width));
     new_tzsp_band = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->r_tzsp_band_2g)) ? MTSCAN_CONF_TZSP_BAND_2GHZ : MTSCAN_CONF_TZSP_BAND_5GHZ;
 
     if(ui.tzsp_rx &&
-       ((conf_get_preferences_tzsp_mode() != new_tzsp_mode) ||
-        (conf_get_preferences_tzsp_udp_port() != new_tzsp_udp_port) ||
-        (strcmp(conf_get_preferences_tzsp_interface(), new_tzsp_interface) != 0) ||
+        ((conf_get_preferences_tzsp_udp_port() != new_tzsp_udp_port) ||
         (conf_get_preferences_tzsp_channel_width() != new_tzsp_channel_width) ||
         (conf_get_preferences_tzsp_band() != new_tzsp_band)))
     {
-
+        /* TODO */
     }
 
-    conf_set_preferences_tzsp_mode(new_tzsp_mode);
     conf_set_preferences_tzsp_udp_port(new_tzsp_udp_port);
-    conf_set_preferences_tzsp_interface(new_tzsp_interface);
     conf_set_preferences_tzsp_channel_width(new_tzsp_channel_width);
     conf_set_preferences_tzsp_band(new_tzsp_band);
 
@@ -1143,15 +1131,27 @@ ui_preferences_apply(GtkWidget *widget,
     conf_set_preferences_blacklist_enabled(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->blacklist.x_enabled)));
     conf_set_preferences_blacklist_inverted(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->blacklist.x_inverted)));
     conf_set_preferences_blacklist_from_liststore(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(p->blacklist.view))));
+    conf_set_preferences_blacklist_external(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->blacklist.x_external)));
+    ext_path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(p->blacklist.c_ext_path));
+    conf_set_preferences_blacklist_ext_path((ext_path ? ext_path : ""));
+    g_free(ext_path);
 
     /* Highlight list */
     conf_set_preferences_highlightlist_enabled(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->highlightlist.x_enabled)));
     conf_set_preferences_highlightlist_inverted(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->highlightlist.x_inverted)));
     conf_set_preferences_highlightlist_from_liststore(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(p->highlightlist.view))));
+    conf_set_preferences_highlightlist_external(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->highlightlist.x_external)));
+    ext_path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(p->highlightlist.c_ext_path));
+    conf_set_preferences_highlightlist_ext_path((ext_path ? ext_path : ""));
+    g_free(ext_path);
 
     /* Alarm list */
     conf_set_preferences_alarmlist_enabled(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->alarmlist.x_enabled)));
     conf_set_preferences_alarmlist_from_liststore(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(p->alarmlist.view))));
+    conf_set_preferences_alarmlist_external(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(p->alarmlist.x_external)));
+    ext_path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(p->alarmlist.c_ext_path));
+    conf_set_preferences_alarmlist_ext_path((ext_path ? ext_path : ""));
+    g_free(ext_path);
 
     /* Location */
     new_location_latitude = gtk_spin_button_get_value(GTK_SPIN_BUTTON(p->s_location_latitude));

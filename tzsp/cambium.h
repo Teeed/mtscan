@@ -1,6 +1,6 @@
 /*
  *  MTscan - MikroTik RouterOS wireless scanner
- *  Copyright (c) 2015-2019  Konrad Kosmatka
+ *  Copyright (c) 2015-2020  Konrad Kosmatka
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License
@@ -13,25 +13,16 @@
  *  GNU General Public License for more details.
  */
 
-#ifndef MTSCAN_LOG_H_
-#define MTSCAN_LOG_H_
-#include <gtk/gtk.h>
-#include "network.h"
+#ifndef MTSCAN_TZSP_CAMBIUM_H
+#define MTSCAN_TZSP_CAMBIUM_H
 
-#define LOG_READ_ERROR_EMPTY  0
-#define LOG_READ_ERROR_OPEN  -1
-#define LOG_READ_ERROR_READ  -2
-#define LOG_READ_ERROR_PARSE -3
+typedef struct cambium_net cambium_net_t;
 
-typedef struct log_save_error
-{
-    size_t wrote;
-    size_t length;
-    gboolean existing_file;
-} log_save_error_t;
+cambium_net_t* cambium_network(const uint8_t*, uint32_t, const uint8_t**);
 
+uint16_t cambium_net_get_frequency(cambium_net_t*);
+const char* cambium_net_get_ssid(cambium_net_t*);
 
-gint log_read(const gchar*, void (*)(network_t*, gpointer), gpointer, gboolean);
-log_save_error_t* log_save(const gchar*, gboolean, gboolean, gboolean, GList*);
+void cambium_net_free(cambium_net_t*);
 
 #endif

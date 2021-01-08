@@ -1,6 +1,6 @@
 /*
  *  MTscan - MikroTik RouterOS wireless scanner
- *  Copyright (c) 2015-2018  Konrad Kosmatka
+ *  Copyright (c) 2015-2020  Konrad Kosmatka
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License
@@ -13,9 +13,10 @@
  *  GNU General Public License for more details.
  */
 
-#ifndef MTSCAN_UI_DIALOG_PCAP_H_
-#define MTSCAN_UI_DIALOG_PCAP_H_
+#ifndef MTSCAN_CONF_EXTLIST_H_
+#define MTSCAN_CONF_EXTLIST_H_
+#include <gtk/gtk.h>
 
-void ui_dialog_pcap_new(GtkWindow*, void (*callback)(const gchar*, gpointer), gpointer);
+gboolean conf_extlist_load(GTree*, const gchar*);
 
 #endif

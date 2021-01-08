@@ -84,13 +84,13 @@ ui_view_menu(GtkWidget      *treeview,
                                          COL_DISTANCE, &distance,
                                          -1);
 
-        if(conf_get_preferences_blacklist_enabled())
+        if(conf_get_preferences_blacklist_enabled() && !conf_get_preferences_blacklist_external())
             flags |= conf_get_preferences_blacklist(address) ? FLAG_UNBLACKLIST : FLAG_BLACKLIST;
 
-        if(conf_get_preferences_highlightlist_enabled())
+        if(conf_get_preferences_highlightlist_enabled() && !conf_get_preferences_highlightlist_external())
             flags |= conf_get_preferences_highlightlist(address) ? FLAG_DEHIGHLIGHT : FLAG_HIGHLIGHT;
 
-        if(conf_get_preferences_alarmlist_enabled())
+        if(conf_get_preferences_alarmlist_enabled() && !conf_get_preferences_alarmlist_external())
             flags |= conf_get_preferences_alarmlist(address) ? FLAG_ALARM_UNSET : FLAG_ALARM_SET;
 
         if(!isnan(latitude) && !isnan(longitude))
@@ -103,13 +103,13 @@ ui_view_menu(GtkWidget      *treeview,
     }
     else
     {
-        if(conf_get_preferences_blacklist_enabled())
+        if(conf_get_preferences_blacklist_enabled() && !conf_get_preferences_blacklist_external())
             flags |= FLAG_BLACKLIST | FLAG_UNBLACKLIST;
 
-        if(conf_get_preferences_highlightlist_enabled())
+        if(conf_get_preferences_highlightlist_enabled() && !conf_get_preferences_highlightlist_external())
             flags |= FLAG_HIGHLIGHT | FLAG_DEHIGHLIGHT;
 
-        if(conf_get_preferences_alarmlist_enabled())
+        if(conf_get_preferences_alarmlist_enabled() && !conf_get_preferences_alarmlist_external())
             flags |= FLAG_ALARM_SET | FLAG_ALARM_UNSET;
 
         menu = ui_view_menu_create(GTK_TREE_VIEW(treeview), count, -1, 0, flags);
@@ -145,6 +145,7 @@ ui_view_menu_create(GtkTreeView *treeview,
     GtkWidget *item_remove;
     gchar* string;
     const gchar* oui;
+    gint64 addr_masked;
 
     /* Header */
     string = (address < 0 ? g_strdup_printf("%d networks", count) : NULL);
@@ -158,11 +159,27 @@ ui_view_menu_create(GtkTreeView *treeview,
     /* OUI lookup */
     if(address >= 0)
     {
-        oui = oui_lookup(address);
+        addr_masked = address & ~(1L << 41);
+        oui = oui_lookup(addr_masked);
+
         if(oui)
         {
-            string = (strlen(oui) > 30) ? g_strdup_printf("%.*s…", 30, oui) : NULL;
-            item_oui = gtk_image_menu_item_new_with_label(string ? string : oui);
+            if(address == addr_masked)
+                string = (strlen(oui) > 32) ? g_strdup_printf("%.*s…", 32, oui) : g_strdup(oui);
+            else
+                string = (strlen(oui) > 28) ? g_strdup_printf("%.*s… (?)", 28, oui) : g_strdup_printf("%s (?)", oui);
+        }
+        else
+        {
+            if(address != addr_masked)
+                string = g_strdup("(locally administered)");
+            else
+                string = NULL;
+        }
+
+        if(string)
+        {
+            item_oui = gtk_image_menu_item_new_with_label(string);
             gtk_menu_shell_append(GTK_MENU_SHELL(menu), item_oui);
             g_free(string);
         }
@@ -193,7 +210,7 @@ ui_view_menu_create(GtkTreeView *treeview,
     if(flags & FLAG_GEOLOC)
     {
         item_geoloc = gtk_image_menu_item_new_with_label("Show geolocation");
-        gtk_image_menu_item_set_image(GTK_IMAGE_MENU_ITEM(item_geoloc), gtk_image_new_from_icon_name("mtscan-wigle", GTK_ICON_SIZE_MENU));
+        gtk_image_menu_item_set_image(GTK_IMAGE_MENU_ITEM(item_geoloc), gtk_image_new_from_icon_name("mtscan-geoloc", GTK_ICON_SIZE_MENU));
         g_signal_connect(item_geoloc, "activate", (GCallback)ui_view_menu_geoloc, treeview);
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), item_geoloc);
     }

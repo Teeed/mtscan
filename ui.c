@@ -57,6 +57,7 @@ static const char rc_string[] = "style \"minimal-toolbar-style\"\n"
                                 "}\n"
                                 "widget \"*.treeview-dark\" style\n\"treeview-dark-style\"\n";
 
+mtscan_gtk_t ui;
 
 static void ui_restore(void);
 static gboolean ui_key(GtkWidget*, GdkEventKey*, gpointer);
@@ -327,7 +328,6 @@ ui_idle_timeout_autosave(gpointer user_data)
         if((ts - ui->log_ts) >= conf_get_preferences_autosave_interval()*60)
         {
             filename = (!ui->filename ? timestamp_to_filename(conf_get_path_autosave(), ui->log_ts) : NULL);
-
             if(!ui_log_save_full((!filename ? ui->filename : filename), FALSE, FALSE, FALSE, NULL, FALSE))
             {
                 g_signal_emit_by_name(ui->b_autosave, "clicked");
@@ -337,9 +337,8 @@ ui_idle_timeout_autosave(gpointer user_data)
                           "Error",
                           "Unable to save a file:\n%s\n\n<b>Autosave has been disabled.</b>",
                           (!filename ? ui->filename : filename));
-
-                g_free(filename);
             }
+            g_free(filename);
         }
     }
 
@@ -448,6 +447,8 @@ ui_disconnected(void)
     mtscan_model_buffer_clear(ui.model);
     mtscan_model_clear_active(ui.model);
     ui_status_update_networks();
+
+    ui_tzsp_destroy();
 }
 
 void
@@ -501,17 +502,16 @@ ui_status_update_networks(void)
 }
 
 void
-ui_set_title(gchar *filename)
+ui_set_title(const gchar *filename)
 {
     gchar *title;
+    gchar *tmp = g_strdup(filename);
 
-    if(filename != ui.filename)
-    {
-        g_free(ui.filename);
-        ui.filename = filename;
-        g_free(ui.name);
-        ui.name = (filename ? ui_get_name(filename) : NULL);
-    }
+    g_free(ui.filename);
+    ui.filename = tmp;
+
+    g_free(ui.name);
+    ui.name = (tmp ? ui_get_name(tmp) : NULL);
 
     if(!ui.filename)
     {
@@ -642,7 +642,7 @@ ui_screenshot(void)
 }
 
 void
-ui_toggle_connection(gint auto_connect)
+ui_toggle_connection(gint auto_connect_profile)
 {
     if(ui.conn)
     {
@@ -656,14 +656,13 @@ ui_toggle_connection(gint auto_connect)
 
     /* Display connection dialog */
     ui_toolbar_connect_set_state(FALSE);
-    ui.conn_dialog = ui_connection_new(auto_connect);
+    ui.conn_dialog = ui_connection_new(auto_connect_profile,
+                                       (auto_connect_profile > 0) ? UI_CONNECTION_MODE_AUTOCONNECT : UI_CONNECTION_MODE_NONE);
 }
 
 void
 ui_tzsp(void)
 {
-    gboolean sniffer_pcap_mode;
-    const gchar *tzsp_interface;
     gint frequency_base;
     gint channel_width;
     guint8 tzsp_hwaddr[6];
@@ -683,14 +682,11 @@ ui_tzsp(void)
     }
 
     /* Read configuration */
-    sniffer_pcap_mode = conf_get_preferences_tzsp_mode() == MTSCAN_CONF_TZSP_MODE_PCAP;
-    tzsp_interface = sniffer_pcap_mode ? conf_get_preferences_tzsp_interface() : NULL;
     channel_width = conf_get_preferences_tzsp_channel_width();
     frequency_base = (conf_get_preferences_tzsp_band() == MTSCAN_CONF_TZSP_BAND_2GHZ) ? 2407 : 5000;
 
 
     ui.tzsp_rx = tzsp_receiver_new((guint16)conf_get_preferences_tzsp_udp_port(),
-                                   tzsp_interface,
                                    tzsp_hwaddr,
                                    channel_width,
                                    frequency_base,
